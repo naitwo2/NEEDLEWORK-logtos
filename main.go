@@ -1,6 +1,5 @@
 //Todo
-//戻り値にmapを指定できない
-//戻り値が足りない。err以外に返さないと。
+//Dest-NATはでDest-ipと逆にしないと
 
 package main
 
@@ -13,20 +12,32 @@ import (
 	"encoding/csv"
 )
 
-type mapKey struct {
-	k1 int
-	k2 string	
+type scenarioLine struct {
+	logtype string
+	srcip string
+	destip string
+	natsrcip string
+	natdestip string
+	rulename string
+	ininterface string
+	outinterface string
+	srcport string
+	destport string								
+	natsrcport string
+	natdestport string		
+	protocol string		
+	action string	
 }
 
 func main() {
-	logdata , err := readLine("pa_2行.log")
+	baseLogData , err := readLine("pa_10000行.log")
 	
 	if err != nil {
-        fmt.Println(os.Stderr, err)
+        //fmt.Println(os.Stderr, err)
         os.Exit(1)
 	}
 	
-	err = genScenario(logdata)
+	err = genScenario(baseLogData)
 
 	//fmt.Println(logdata)
 	//println(j)
@@ -34,14 +45,12 @@ func main() {
 
 
 
-func readLine(filename string) (map[mapKey]string , error) {
-
-	//logdataMap := map[int]map[string]string{}
-	logdataMap := make(map[mapKey]string)
+func readLine(filename string) ([]scenarioLine , error) {
+	var logdata []scenarioLine
 
     file, err := os.Open(filename)
     if err != nil {
-        return logdataMap , err
+        return logdata , err
     }
     defer file.Close()
 
@@ -56,59 +65,116 @@ func readLine(filename string) (map[mapKey]string , error) {
             break
         }
         if err != nil {
-       		return logdataMap , err
+       		return logdata , err
         }
 		
-		// カンマでスライス
+		// カンマでスプリット
 		slice := strings.Split(string(line), ",")
 
-		//スライスした値をMAPに代入
+		//スプリットした値をMAPに代入
+		logdataLineMap := make(map[string]string)
   		for i, str := range slice {
 			switch(i){
 				case 3:
-					logdataMap[mapKey{j, "type"}] = str
+					logdataLineMap["logtype"] = str
 				case 7:
-					logdataMap[mapKey{j, "srcip"}] = str
+					logdataLineMap["srcip"] = str
 				case 8:
-					logdataMap[mapKey{j, "destip"}] = str
+					logdataLineMap["destip"] = str
 				case 9:
-					logdataMap[mapKey{j, "natsrcip"}] = str
+					logdataLineMap["natsrcip"] = str
 				case 10:
-					logdataMap[mapKey{j, "natdestip"}] = str
+					logdataLineMap["natdestip"] = str
 				case 11:
-					logdataMap[mapKey{j, "rulename"}] = str		
+					logdataLineMap["rulename"] = str
 				case 18:
-					logdataMap[mapKey{j, "ininterface"}] = str	
+					logdataLineMap["ininterface"] = str
 				case 19:
-					logdataMap[mapKey{j, "outinterface"}] = str	
+					logdataLineMap["outinterface"] = str
 				case 24:
-					logdataMap[mapKey{j, "srcport"}] = str	
+					logdataLineMap["srcport"] = str
 				case 25:
-					logdataMap[mapKey{j, "destport"}] = str	
+					logdataLineMap["destport"] = str
 				case 26:
-					logdataMap[mapKey{j, "natsrcport"}] = str	
+					logdataLineMap["natsrcport"] = str
 				case 27:
-					logdataMap[mapKey{j, "natdestport"}] = str	
+					logdataLineMap["natdestport"] = str
 				case 29:
-					logdataMap[mapKey{j, "protocol"}] = str	
+					logdataLineMap["protocol"] = str
 				case 30:
-					logdataMap[mapKey{j, "action"}] = str	
+					logdataLineMap["action"] = str
 			}
 		}  
 
         if !isPrefix {
             fmt.Println()
 		}
+
+		//----値をシナリオ対応用語に変更----
+		//Action
+		switch(logdataLineMap["action"]){
+			case "allow":
+				logdataLineMap["action"] = "pass"
+			case "deny":
+				logdataLineMap["deny"] = "drop"				
+			default:
+				logdataLineMap["action"] = "undefined"
+		}
+
+		//DestNATIP 作成中
+		switch{
+			case logdataLineMap["natdestip"] ==  "0.0.0.0":
+				logdataLineMap["natdestip"] = ""
+			case logdataLineMap["natdestip"] != "":
+				//logdataLineMap["natdestip"] = "DstNATしてる"
+		}
+
+		//SrcNATIP
+		switch{
+			case logdataLineMap["natsrcip"] == "0.0.0.0":
+				logdataLineMap["natsrcip"] = ""
+
+		}
+
+		//SrcPort
+		switch{
+			case logdataLineMap["srcport"] == "0":
+				logdataLineMap["srcport"] = ""
+		}
+		//DestPort
+		switch{
+			case logdataLineMap["destport"] == "0":
+				logdataLineMap["destport"] = ""
+		}
+		//NatDestPort
+		switch{
+			case logdataLineMap["natdestport"] == "0":
+				logdataLineMap["natdestport"] = ""
+		}
+		//NatSrcPort
+		switch{
+			case logdataLineMap["natsrcport"] == "0":
+				logdataLineMap["natsrcport"] = ""
+		}
+
+		//----End 値をシナリオ対応用語に変更----
+
+		//MAPに入れた値をスライスに代入（e.g: TRAFFIC 172.16.20.238...）
+		logdata = append(logdata, scenarioLine{logdataLineMap["logtype"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"]})
+
 		j =  j + 1
+		/* fmt.Println(logdata)
+		fmt.Println(logdata[0])
+		fmt.Println(logdata[0].logtype)
+ */
 	}
 
-	//fmt.Println(logdataMap)
-    return logdataMap , nil
+    return logdata , nil
 }
 
-func genScenario(logdata map[mapKey]string) error {
+func genScenario(baseLogData []scenarioLine) error {
 
-
+	//CSVファイルを新規作成
 	file, err := os.Create("NEEDLEWORK_Scenario.csv")
 
     if err != nil {
@@ -127,20 +193,24 @@ func genScenario(logdata map[mapKey]string) error {
 	//writer.Write([]string{"Alice", "20"})        
 	//writer.Write(logdata{1 "srcip"})        
 
-fmt.Println(logdata[[0],["destip"]])
+//fmt.Println(baseLogdata)
 
 /* 	for i := 0; i < 5; i++ {
 		fmt.Println(i) // 0 1 2 3 4が出力される
 		fmt.Println(logdata)
 	} */
 
-/*     for _, value := range logdata {
+	//ヘッダー情報書き込み
+	writer.Write([]string{"exclude-list","protocol","src-fw","src-vlan(option)","src-ip","src-port(option)","src-nat-ip(option)","dst-fw","dst-vlan(option)","dst-nat-ip(option)","dst-nat-port (option)","dst-ip","dst-port","url/domain(option)","anti-virus(option)","timeout(option)","try(option)","other-settings(option)","expect","description"})
+	
+	for _, value := range baseLogData {
 		//fmt.Printf("key:%i -> value=%s\n", key, value)
-		fmt.Println(key)
-		writer.Write([]string{value , ","})     
-	} */
+		//fmt.Println(value[0].logtype)
+		//fmt.Println(value.logtype)
+		writer.Write([]string{"",value.protocol , "s-fw" , "s-vlan" , value.srcip , value.srcport , value.natsrcip , "dst-fw" , "dst-vlan" , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename})     
+	}
 	
 	writer.Flush() 
 
-return nil
+	return nil
 }
