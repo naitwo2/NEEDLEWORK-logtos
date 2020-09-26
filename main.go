@@ -1,5 +1,6 @@
 //Todo
 //Dest-NATはでDest-ipと逆にしないと
+//tomlからFW-IP情報を読みとる
 
 package main
 
@@ -10,9 +11,10 @@ import (
 	"os"
 	"strings"
 	"encoding/csv"
+	//"github.com/nirasan/environment-toml"
 )
 
-type scenarioLine struct {
+type ScenarioLine struct {
 	logtype string
 	srcip string
 	destip string
@@ -28,6 +30,7 @@ type scenarioLine struct {
 	protocol string		
 	action string	
 }
+
 
 func main() {
 	baseLogData , err := readLine("pa_10000行.log")
@@ -45,8 +48,8 @@ func main() {
 
 
 
-func readLine(filename string) ([]scenarioLine , error) {
-	var logdata []scenarioLine
+func readLine(filename string) ([]ScenarioLine , error) {
+	var logdata []ScenarioLine
 
     file, err := os.Open(filename)
     if err != nil {
@@ -116,7 +119,7 @@ func readLine(filename string) ([]scenarioLine , error) {
 			case "allow":
 				logdataLineMap["action"] = "pass"
 			case "deny":
-				logdataLineMap["deny"] = "drop"				
+				logdataLineMap["action"] = "drop"				
 			default:
 				logdataLineMap["action"] = "undefined"
 		}
@@ -160,7 +163,7 @@ func readLine(filename string) ([]scenarioLine , error) {
 		//----End 値をシナリオ対応用語に変更----
 
 		//MAPに入れた値をスライスに代入（e.g: TRAFFIC 172.16.20.238...）
-		logdata = append(logdata, scenarioLine{logdataLineMap["logtype"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"]})
+		logdata = append(logdata, ScenarioLine{logdataLineMap["logtype"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"]})
 
 		j =  j + 1
 		/* fmt.Println(logdata)
@@ -172,7 +175,7 @@ func readLine(filename string) ([]scenarioLine , error) {
     return logdata , nil
 }
 
-func genScenario(baseLogData []scenarioLine) error {
+func genScenario(baseLogData []ScenarioLine) error {
 
 	//CSVファイルを新規作成
 	file, err := os.Create("NEEDLEWORK_Scenario.csv")
