@@ -1,6 +1,7 @@
 //Todo
 //Dest-NATはでDest-ipと逆にしないと
-//tomlからFW-IP情報を読みとる
+//ZONE情報をログから取り入れる
+//TOMLにVLAN情報入れる
 
 package main
 
@@ -11,7 +12,7 @@ import (
 	"os"
 	"strings"
 	"encoding/csv"
-	//"github.com/nirasan/environment-toml"
+	"github.com/BurntSushi/toml"
 )
 
 type ScenarioLine struct {
@@ -31,23 +32,39 @@ type ScenarioLine struct {
 	action string	
 }
 
+type TomlConfig struct {
+	Device		DeviceConfig		
+}
+
+type DeviceConfig struct {
+	Device		string			`toml:"devicename"`
+	Interface	[]NetworkConfig	`toml:"interface"`
+}
+
+type NetworkConfig struct {
+    Ifname	string	 `toml:"ifname"`
+	Ip		string	 `toml:"ip"`
+	Zone	string	 `toml:"zone"`
+}
+
 
 func main() {
-	baseLogData , err := readLine("pa_10000行.log")
+
+	baseLogData , err := readLine("pa_2行.log")
 	
 	if err != nil {
         //fmt.Println(os.Stderr, err)
         os.Exit(1)
 	}
 	
-	err = genScenario(baseLogData)
+	err = genScenario(baseLogData , "config.tml")
 
 	//fmt.Println(logdata)
 	//println(j)
 }
 
 
-
+//logファイルを読み込む
 func readLine(filename string) ([]ScenarioLine , error) {
 	var logdata []ScenarioLine
 
@@ -175,7 +192,18 @@ func readLine(filename string) ([]ScenarioLine , error) {
     return logdata , nil
 }
 
-func genScenario(baseLogData []ScenarioLine) error {
+func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
+
+	//Tomlファイル読み込み
+	var config TomlConfig
+	_, err := toml.DecodeFile(tomlFile, &config)
+  	if err != nil {
+        return err
+    }
+	//fmt.Println(config.Interface.IP)
+	fmt.Println(config)
+	fmt.Println(config.Device.Interface[0].Ifname)
+
 
 	//CSVファイルを新規作成
 	file, err := os.Create("NEEDLEWORK_Scenario.csv")
@@ -203,14 +231,34 @@ func genScenario(baseLogData []ScenarioLine) error {
 		fmt.Println(logdata)
 	} */
 
-	//ヘッダー情報書き込み
+	//シナリオヘッダー情報書き込み
 	writer.Write([]string{"exclude-list","protocol","src-fw","src-vlan(option)","src-ip","src-port(option)","src-nat-ip(option)","dst-fw","dst-vlan(option)","dst-nat-ip(option)","dst-nat-port (option)","dst-ip","dst-port","url/domain(option)","anti-virus(option)","timeout(option)","try(option)","other-settings(option)","expect","description"})
 	
+	//スライスに格納したログを取り出し、シナリオを作成する
+	sfw  := "Undefined"
+	dfw  := "Undefined"
 	for _, value := range baseLogData {
 		//fmt.Printf("key:%i -> value=%s\n", key, value)
 		//fmt.Println(value[0].logtype)
 		//fmt.Println(value.logtype)
-		writer.Write([]string{"",value.protocol , "s-fw" , "s-vlan" , value.srcip , value.srcport , value.natsrcip , "dst-fw" , "dst-vlan" , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename})     
+
+		//Tomlファイルに記載したIF情報とログ中のIN/OUT IF情報を比較する
+		for _, tomlValue := range config.Device.Interface {
+
+			switch{
+				case value.ininterface == tomlValue.Ifname:
+					sfw = tomlValue.Ip
+				case value.outinterface == tomlValue.Ifname:
+					dfw = tomlValue.Ip
+				//out IFが空 = 通信がDropされた場合の処理
+				//case value.outinterface == "":
+				//	if value.ininterface == tomlValue.Zone
+			}
+
+		}
+
+
+		writer.Write([]string{"",value.protocol , sfw , "s-vlan" , value.srcip , value.srcport , value.natsrcip , dfw , "dst-vlan" , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename})     
 	}
 	
 	writer.Flush() 

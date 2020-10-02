@@ -1,0 +1,13 @@
+
+[device]
+devicename = "Paloalto"
+
+[[device.interface]]
+ifname  = "ethernet1/1.2555"
+ip      = "10.1.1.254"
+zone    = "DMZ1"
+
+[[device.interface]]
+ifname  = "ethernet1/1.20"
+ip      = "10.1.2.254"
+zone    = "DMZ2"
