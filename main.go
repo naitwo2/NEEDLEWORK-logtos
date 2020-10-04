@@ -1,7 +1,7 @@
 //Todo
 //Dest-NATはでDest-ipと逆にしないと
-//ZONE情報をログから取り入れる
 //TOMLにVLAN情報入れる
+//同じZoneが複数IFに割り当てられている場合にシナリオ複数
 
 package main
 
@@ -13,6 +13,7 @@ import (
 	"strings"
 	"encoding/csv"
 	"github.com/BurntSushi/toml"
+	"flag"
 )
 
 type ScenarioLine struct {
@@ -22,6 +23,8 @@ type ScenarioLine struct {
 	natsrcip string
 	natdestip string
 	rulename string
+	srczone string
+	destzone string	
 	ininterface string
 	outinterface string
 	srcport string
@@ -30,6 +33,7 @@ type ScenarioLine struct {
 	natdestport string		
 	protocol string		
 	action string	
+	description string	
 }
 
 type TomlConfig struct {
@@ -45,19 +49,25 @@ type NetworkConfig struct {
     Ifname	string	 `toml:"ifname"`
 	Ip		string	 `toml:"ip"`
 	Zone	string	 `toml:"zone"`
+	Vlanid	string	 `toml:"vlanid"`	
 }
 
-
 func main() {
+    var (
+		flgLog = flag.String("l", "", "specification a log file.")
+        flgCfg = flag.String("c", "config.tml", "specification a config file.")
+		
+    )
+    flag.Parse()
 
-	baseLogData , err := readLine("pa_2行.log")
-	
+	baseLogData , err := readLine(*flgLog)
+
 	if err != nil {
         //fmt.Println(os.Stderr, err)
         os.Exit(1)
 	}
 	
-	err = genScenario(baseLogData , "config.tml")
+	err = genScenario(baseLogData , *flgCfg)
 
 	//fmt.Println(logdata)
 	//println(j)
@@ -107,6 +117,10 @@ func readLine(filename string) ([]ScenarioLine , error) {
 					logdataLineMap["natdestip"] = str
 				case 11:
 					logdataLineMap["rulename"] = str
+				case 16:
+					logdataLineMap["srczone"] = str
+				case 17:
+					logdataLineMap["destzone"] = str
 				case 18:
 					logdataLineMap["ininterface"] = str
 				case 19:
@@ -130,6 +144,9 @@ func readLine(filename string) ([]ScenarioLine , error) {
             fmt.Println()
 		}
 
+		//想定しない値があった場合にdescriptionに追記する
+		logdataLineMap["description"] = " ,"
+
 		//----値をシナリオ対応用語に変更----
 		//Action
 		switch(logdataLineMap["action"]){
@@ -138,22 +155,29 @@ func readLine(filename string) ([]ScenarioLine , error) {
 			case "deny":
 				logdataLineMap["action"] = "drop"				
 			default:
+				logdataLineMap["description"] += " | exception(action:" + logdataLineMap["action"] + ")"
 				logdataLineMap["action"] = "undefined"
 		}
 
-		//DestNATIP 作成中
+		//DestNATIP
+		//DestNATしている場合は、宛先と宛先NATIPを入れ替えてシナリオを作成する
 		switch{
 			case logdataLineMap["natdestip"] ==  "0.0.0.0":
 				logdataLineMap["natdestip"] = ""
 			case logdataLineMap["natdestip"] != "":
-				//logdataLineMap["natdestip"] = "DstNATしてる"
+				tmpVar := logdataLineMap["destip"]
+				logdataLineMap["destip"] = logdataLineMap["natdestip"]
+				logdataLineMap["natdestip"] = tmpVar
+				//宛先ポートとNAT宛先ポートの入れ替え
+				tmpVar = logdataLineMap["destport"]
+				logdataLineMap["destport"] = logdataLineMap["natdestport"]
+				logdataLineMap["natdestport"] = tmpVar
 		}
 
 		//SrcNATIP
 		switch{
 			case logdataLineMap["natsrcip"] == "0.0.0.0":
 				logdataLineMap["natsrcip"] = ""
-
 		}
 
 		//SrcPort
@@ -176,11 +200,17 @@ func readLine(filename string) ([]ScenarioLine , error) {
 			case logdataLineMap["natsrcport"] == "0":
 				logdataLineMap["natsrcport"] = ""
 		}
+		//Protocol
+		switch{
+			case logdataLineMap["protocol"] != "icmp" || logdataLineMap["protocol"] != "tcp" || logdataLineMap["protocol"] != "udp":
+				logdataLineMap["description"] += " | exception(protocol:" + logdataLineMap["protocol"] + ")"
+				logdataLineMap["protocol"] = "undefined"
+		}
 
 		//----End 値をシナリオ対応用語に変更----
 
 		//MAPに入れた値をスライスに代入（e.g: TRAFFIC 172.16.20.238...）
-		logdata = append(logdata, ScenarioLine{logdataLineMap["logtype"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"]})
+		logdata = append(logdata, ScenarioLine{logdataLineMap["logtype"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["srczone"],logdataLineMap["destzone"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"],logdataLineMap["description"]})
 
 		j =  j + 1
 		/* fmt.Println(logdata)
@@ -235,30 +265,42 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
 	writer.Write([]string{"exclude-list","protocol","src-fw","src-vlan(option)","src-ip","src-port(option)","src-nat-ip(option)","dst-fw","dst-vlan(option)","dst-nat-ip(option)","dst-nat-port (option)","dst-ip","dst-port","url/domain(option)","anti-virus(option)","timeout(option)","try(option)","other-settings(option)","expect","description"})
 	
 	//スライスに格納したログを取り出し、シナリオを作成する
-	sfw  := "Undefined"
-	dfw  := "Undefined"
+	sfw		:= "Undefined"
+	dfw		:= "Undefined"
+	svlan	:= "0"
+	dvlan 	:= "0"
+	// description := ""
 	for _, value := range baseLogData {
 		//fmt.Printf("key:%i -> value=%s\n", key, value)
 		//fmt.Println(value[0].logtype)
 		//fmt.Println(value.logtype)
 
-		//Tomlファイルに記載したIF情報とログ中のIN/OUT IF情報を比較する
+		//description = value.rulename
+		//Tomlファイルに記載したIF情報とログ中のIN/OUT IF情報を比較し、s-fw、d−fwのIPアドレスを割り当てる
+		multipleDfwFlog := 0
 		for _, tomlValue := range config.Device.Interface {
-
 			switch{
 				case value.ininterface == tomlValue.Ifname:
 					sfw = tomlValue.Ip
+					svlan = tomlValue.Vlanid
 				case value.outinterface == tomlValue.Ifname:
 					dfw = tomlValue.Ip
-				//out IFが空 = 通信がDropされた場合の処理
-				//case value.outinterface == "":
-				//	if value.ininterface == tomlValue.Zone
-			}
+					dvlan = tomlValue.Vlanid
+				//out IFが空 = Dropログの場合の処理（Zoneからs-fw、d−fwのIPアドレスを割り当てる）
+				case value.outinterface == "":
+					if value.destzone == tomlValue.Zone {
+						dfw = tomlValue.Ip
+						multipleDfwFlog ++
+						fmt.Println(value.action , multipleDfwFlog)	
+					}
+				default:
+					value.description += " | exception(s-fw or d-fw)" 
 
+			}
 		}
 
 
-		writer.Write([]string{"",value.protocol , sfw , "s-vlan" , value.srcip , value.srcport , value.natsrcip , dfw , "dst-vlan" , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename})     
+		writer.Write([]string{"",value.protocol , sfw , svlan , value.srcip , value.srcport , value.natsrcip , dfw , dvlan , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename , value.description})     
 	}
 	
 	writer.Flush() 
