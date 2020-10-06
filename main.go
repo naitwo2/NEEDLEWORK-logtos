@@ -1,6 +1,4 @@
 //Todo
-//Dest-NATはでDest-ipと逆にしないと
-//TOMLにVLAN情報入れる
 //同じZoneが複数IFに割り当てられている場合にシナリオ複数
 
 package main
@@ -54,16 +52,15 @@ type NetworkConfig struct {
 
 func main() {
     var (
-		flgLog = flag.String("l", "", "specification a log file.")
         flgCfg = flag.String("c", "config.tml", "specification a config file.")
 		
     )
-    flag.Parse()
-
-	baseLogData , err := readLine(*flgLog)
+	flag.Parse()
+    args := flag.Args()
+	baseLogData , err := readLine(args[0])
 
 	if err != nil {
-        //fmt.Println(os.Stderr, err)
+		fmt.Println(err)
         os.Exit(1)
 	}
 	
@@ -202,9 +199,11 @@ func readLine(filename string) ([]ScenarioLine , error) {
 		}
 		//Protocol
 		switch{
-			case logdataLineMap["protocol"] != "icmp" || logdataLineMap["protocol"] != "tcp" || logdataLineMap["protocol"] != "udp":
+			case logdataLineMap["protocol"] == "icmp" || logdataLineMap["protocol"] == "tcp" || logdataLineMap["protocol"] == "udp":
+				break
+			default:
 				logdataLineMap["description"] += " | exception(protocol:" + logdataLineMap["protocol"] + ")"
-				logdataLineMap["protocol"] = "undefined"
+				logdataLineMap["protocol"] = "undefined"	
 		}
 
 		//----End 値をシナリオ対応用語に変更----
@@ -231,8 +230,8 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
         return err
     }
 	//fmt.Println(config.Interface.IP)
-	fmt.Println(config)
-	fmt.Println(config.Device.Interface[0].Ifname)
+	//fmt.Println(config)
+	//fmt.Println(config.Device.Interface[0].Ifname)
 
 
 	//CSVファイルを新規作成
@@ -251,56 +250,53 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
 	}
 	
 	writer := csv.NewWriter(file) // utf8
-	//writer.Write([]string{"Alice", "20"})        
-	//writer.Write(logdata{1 "srcip"})        
-
-//fmt.Println(baseLogdata)
-
-/* 	for i := 0; i < 5; i++ {
-		fmt.Println(i) // 0 1 2 3 4が出力される
-		fmt.Println(logdata)
-	} */
 
 	//シナリオヘッダー情報書き込み
 	writer.Write([]string{"exclude-list","protocol","src-fw","src-vlan(option)","src-ip","src-port(option)","src-nat-ip(option)","dst-fw","dst-vlan(option)","dst-nat-ip(option)","dst-nat-port (option)","dst-ip","dst-port","url/domain(option)","anti-virus(option)","timeout(option)","try(option)","other-settings(option)","expect","description"})
-	
+
 	//スライスに格納したログを取り出し、シナリオを作成する
 	sfw		:= "Undefined"
-	dfw		:= "Undefined"
+	//var dfw		[]string
+	var newDfw	[]string
 	svlan	:= "0"
 	dvlan 	:= "0"
 	// description := ""
 	for _, value := range baseLogData {
-		//fmt.Printf("key:%i -> value=%s\n", key, value)
-		//fmt.Println(value[0].logtype)
-		//fmt.Println(value.logtype)
 
-		//description = value.rulename
 		//Tomlファイルに記載したIF情報とログ中のIN/OUT IF情報を比較し、s-fw、d−fwのIPアドレスを割り当てる
-		multipleDfwFlog := 0
+		//i := 0
 		for _, tomlValue := range config.Device.Interface {
+			
 			switch{
+				//out IFが空 = Dropログの場合の処理（Zoneからs-fw、d−fwのIPアドレスを割り当てる）
+				case value.outinterface == "":
+					fmt.Println(value.outinterface)
+					if value.destzone == tomlValue.Zone {
+						newDfw  = append(newDfw, tomlValue.Ip)
+						//i ++
+						fmt.Println(newDfw)
+					} else{
+						newDfw = append(newDfw, "Undefined")
+						value.description += " | exception(s-fw or d-fw)"
+					}
 				case value.ininterface == tomlValue.Ifname:
 					sfw = tomlValue.Ip
 					svlan = tomlValue.Vlanid
 				case value.outinterface == tomlValue.Ifname:
-					dfw = tomlValue.Ip
+					newDfw  = append(newDfw, tomlValue.Ip)
 					dvlan = tomlValue.Vlanid
-				//out IFが空 = Dropログの場合の処理（Zoneからs-fw、d−fwのIPアドレスを割り当てる）
-				case value.outinterface == "":
-					if value.destzone == tomlValue.Zone {
-						dfw = tomlValue.Ip
-						multipleDfwFlog ++
-						fmt.Println(value.action , multipleDfwFlog)	
-					}
 				default:
+					newDfw = append(newDfw, "Undefined")
 					value.description += " | exception(s-fw or d-fw)" 
 
 			}
 		}
 
-
-		writer.Write([]string{"",value.protocol , sfw , svlan , value.srcip , value.srcport , value.natsrcip , dfw , dvlan , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename , value.description})     
+		//fmt.Println(dfw)
+		//シナリオの組み立て
+		for _, dfwMulti := range newDfw {
+			writer.Write([]string{"",value.protocol , sfw , svlan , value.srcip , value.srcport , value.natsrcip , dfwMulti , dvlan , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename , value.description})     
+		}
 	}
 	
 	writer.Flush() 
