@@ -4,22 +4,24 @@ devicename = "Paloalto"
 
 [[device.interface]]
 ifname  = "ethernet1/1"
-ip      = "10.1.1.254"
+ip      = "10.0.0.251"
 zone    = "Untrust"
+vlanid  = "" 
+
+[[device.interface]]
+ifname  = "ethernet1/3.20"
+ip      = "172.16.20.251"
+zone    = "DMZ1"
+vlanid  = "20" 
+
+[[device.interface]]
+ifname  = "ethernet1/3.30"
+ip      = "172.16.30.251"
+zone    = "DMZ2"
+vlanid  = "30" 
 
 [[device.interface]]
 ifname  = "ethernet1/4"
-ip      = "11.1.1.254"
-zone    = "Untrust"
-
-[[device.interface]]
-ifname  = "ethernet1/2"
-ip      = "172.16.1.254"
+ip      = "172.16.0.251"
 zone    = "Trust"
-vlanid  = "10" 
-
-[[device.interface]]
-ifname  = "ethernet1/3"
-ip      = "172.16.2.254"
-zone    = "Trust"
-vlanid  = "30" 
+vlanid  = "" 

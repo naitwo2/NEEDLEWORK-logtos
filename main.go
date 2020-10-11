@@ -1,5 +1,6 @@
 //Todo
 //同じZoneが複数IFに割り当てられている場合にシナリオ複数
+//ログファイルを指定しない場合のエラー表示
 
 package main
 
@@ -12,10 +13,12 @@ import (
 	"encoding/csv"
 	"github.com/BurntSushi/toml"
 	"flag"
+	"time"
 )
 
 type ScenarioLine struct {
 	logtype string
+	time string
 	srcip string
 	destip string
 	natsrcip string
@@ -31,7 +34,9 @@ type ScenarioLine struct {
 	natdestport string		
 	protocol string		
 	action string	
+	ser string
 	description string	
+	
 }
 
 type TomlConfig struct {
@@ -52,24 +57,34 @@ type NetworkConfig struct {
 
 func main() {
     var (
-        flgCfg = flag.String("c", "config.tml", "specification a config file.")
+	 	flgLogFile	= flag.String("l", "", "Specification a log file.")
+		flgCfg		= flag.String("c", "config.tml", "Specification a config file.")
+        flgSer		= flag.String("ser", "no", "If \"Session End Reason\" is \"threat\", it will not be output to the scenario.")
 		
-    )
+	)
+	
 	flag.Parse()
-    args := flag.Args()
-	baseLogData , err := readLine(args[0])
+	if *flgLogFile == "" {
+        fmt.Println("Log file not specified.")
+		os.Exit(1)
+	}
+	
+	baseLogData , err := readLine(*flgLogFile)
 
 	if err != nil {
 		fmt.Println(err)
         os.Exit(1)
 	}
 	
-	err = genScenario(baseLogData , *flgCfg)
+	//fmt.Println(args)
 
-	//fmt.Println(logdata)
-	//println(j)
+	err = genScenario(baseLogData , *flgCfg , *flgSer)
+
+	if err != nil {
+		fmt.Println(err)
+        os.Exit(1)
+	}
 }
-
 
 //logファイルを読み込む
 func readLine(filename string) ([]ScenarioLine , error) {
@@ -104,6 +119,8 @@ func readLine(filename string) ([]ScenarioLine , error) {
 			switch(i){
 				case 3:
 					logdataLineMap["logtype"] = str
+				case 6:
+					logdataLineMap["time"] = str
 				case 7:
 					logdataLineMap["srcip"] = str
 				case 8:
@@ -134,12 +151,15 @@ func readLine(filename string) ([]ScenarioLine , error) {
 					logdataLineMap["protocol"] = str
 				case 30:
 					logdataLineMap["action"] = str
+				case 46:
+					//Session End Reason
+					logdataLineMap["ser"] = str					
 			}
 		}  
 
-        if !isPrefix {
-            fmt.Println()
-		}
+    	if isPrefix {
+			break
+		} 
 
 		//想定しない値があった場合にdescriptionに追記する
 		logdataLineMap["description"] = " ,"
@@ -209,7 +229,7 @@ func readLine(filename string) ([]ScenarioLine , error) {
 		//----End 値をシナリオ対応用語に変更----
 
 		//MAPに入れた値をスライスに代入（e.g: TRAFFIC 172.16.20.238...）
-		logdata = append(logdata, ScenarioLine{logdataLineMap["logtype"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["srczone"],logdataLineMap["destzone"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"],logdataLineMap["description"]})
+		logdata = append(logdata, ScenarioLine{logdataLineMap["logtype"],logdataLineMap["time"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["srczone"],logdataLineMap["destzone"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"],logdataLineMap["ser"],logdataLineMap["description"]})
 
 		j =  j + 1
 		/* fmt.Println(logdata)
@@ -221,7 +241,7 @@ func readLine(filename string) ([]ScenarioLine , error) {
     return logdata , nil
 }
 
-func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
+func genScenario(baseLogData []ScenarioLine , tomlFile string , ser string) error {
 
 	//Tomlファイル読み込み
 	var config TomlConfig
@@ -235,7 +255,9 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
 
 
 	//CSVファイルを新規作成
-	file, err := os.Create("NEEDLEWORK_Scenario.csv")
+	t := time.Now().Format("20060102150405")
+	ScenarioName := "NEEDLEWORK_Scenario_" + t + ".csv"
+	file, err := os.Create(ScenarioName)
 
     if err != nil {
         return err
@@ -254,30 +276,51 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
 	//シナリオヘッダー情報書き込み
 	writer.Write([]string{"exclude-list","protocol","src-fw","src-vlan(option)","src-ip","src-port(option)","src-nat-ip(option)","dst-fw","dst-vlan(option)","dst-nat-ip(option)","dst-nat-port (option)","dst-ip","dst-port","url/domain(option)","anti-virus(option)","timeout(option)","try(option)","other-settings(option)","expect","description"})
 
-	//スライスに格納したログを取り出し、シナリオを作成する
+	//デフォルト値指定
 	sfw		:= "Undefined"
-	//var dfw		[]string
-	var newDfw	[]string
+	var dfw		[]string
 	svlan	:= "0"
 	dvlan 	:= "0"
 	// description := ""
-	for _, value := range baseLogData {
+	//スライスに格納したログを取り出し、シナリオを作成する
+	for i, value := range baseLogData {
 
+		switch {
+			//ログヘッダーの読み込みをスキップする
+			case value.logtype != "TRAFFIC":
+				continue
+		}
+
+
+		//セッション終了理由がthratのログはシナリオから除外
+		switch{
+			case ser == "yes":
+				if value.ser == "threat" {
+					fmt.Println(i)
+					continue
+				}
+		}
+		
+
+		var newDfw	[]string
+		
 		//Tomlファイルに記載したIF情報とログ中のIN/OUT IF情報を比較し、s-fw、d−fwのIPアドレスを割り当てる
 		//i := 0
 		for _, tomlValue := range config.Device.Interface {
-			
+		
 			switch{
+				//宛先IPがFWのインタフェースに設定されているIPの場合は除外する
+				case value.destip == tomlValue.Ip:
+					continue
+				//送信元IPがFWのインタフェースに設定されているIPの場合は除外する
+				case value.srcip == tomlValue.Ip:
+					continue
 				//out IFが空 = Dropログの場合の処理（Zoneからs-fw、d−fwのIPアドレスを割り当てる）
 				case value.outinterface == "":
-					fmt.Println(value.outinterface)
+					//fmt.Println(value.outinterface)
 					if value.destzone == tomlValue.Zone {
 						newDfw  = append(newDfw, tomlValue.Ip)
-						//i ++
-						fmt.Println(newDfw)
-					} else{
-						newDfw = append(newDfw, "Undefined")
-						value.description += " | exception(s-fw or d-fw)"
+						
 					}
 				case value.ininterface == tomlValue.Ifname:
 					sfw = tomlValue.Ip
@@ -286,16 +329,20 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string ) error {
 					newDfw  = append(newDfw, tomlValue.Ip)
 					dvlan = tomlValue.Vlanid
 				default:
-					newDfw = append(newDfw, "Undefined")
-					value.description += " | exception(s-fw or d-fw)" 
-
+					//newDfw = append(newDfw, "Undefined")
+					//value.description += " | exception(s-fw or d-fw)" 
 			}
+			//newDfw = append(newDfw[:10], newDfw[10+1:]...)
+			dfw = newDfw
 		}
 
 		//fmt.Println(dfw)
+		//fmt.Println(value.destip)
+
+		//fmt.Println(dfw)
 		//シナリオの組み立て
-		for _, dfwMulti := range newDfw {
-			writer.Write([]string{"",value.protocol , sfw , svlan , value.srcip , value.srcport , value.natsrcip , dfwMulti , dvlan , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename , value.description})     
+		for _, dfwMulti := range dfw {
+			writer.Write([]string{"",value.protocol , sfw , svlan , value.srcip , value.srcport , value.natsrcip , dfwMulti , dvlan , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename + " | " + value.time , value.description})     
 		}
 	}
 	
