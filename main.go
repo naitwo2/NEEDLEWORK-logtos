@@ -14,6 +14,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"flag"
 	"time"
+	"strconv"
 )
 
 type ScenarioLine struct {
@@ -55,9 +56,14 @@ type NetworkConfig struct {
 	Vlanid	string	 `toml:"vlanid"`	
 }
 
+type UnexpectedResult struct {
+	No			int	
+	Message		string			
+}
+
 func main() {
     var (
-	 	flgLogFile	= flag.String("l", "", "Specification a log file.")
+	 	flgLogFile	= flag.String("f", "", "Specification a log file.")
 		flgCfg		= flag.String("c", "config.tml", "Specification a config file.")
         flgSer		= flag.String("ser", "no", "If \"Session End Reason\" is \"threat\", it will not be output to the scenario.")
 		
@@ -113,8 +119,15 @@ func readLine(filename string) ([]ScenarioLine , error) {
 		// カンマでスプリット
 		slice := strings.Split(string(line), ",")
 
+		//CSVフォーマットをチェック
+		if len(slice) != 65 {
+			fmt.Println("Unexpected a log format.")
+			os.Exit(1)
+		}
+
 		//スプリットした値をMAPに代入
 		logdataLineMap := make(map[string]string)
+
   		for i, str := range slice {
 			switch(i){
 				case 3:
@@ -232,16 +245,16 @@ func readLine(filename string) ([]ScenarioLine , error) {
 		logdata = append(logdata, ScenarioLine{logdataLineMap["logtype"],logdataLineMap["time"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["srczone"],logdataLineMap["destzone"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"],logdataLineMap["ser"],logdataLineMap["description"]})
 
 		j =  j + 1
-		/* fmt.Println(logdata)
-		fmt.Println(logdata[0])
-		fmt.Println(logdata[0].logtype)
- */
+
 	}
 
     return logdata , nil
 }
 
-func genScenario(baseLogData []ScenarioLine , tomlFile string , ser string) error {
+func genScenario(baseLogData []ScenarioLine , tomlFile string , flgSer string) error {
+
+	//シナリオに出力しないログを格納
+	var unexpectedLogs []UnexpectedResult
 
 	//Tomlファイル読み込み
 	var config TomlConfig
@@ -249,15 +262,12 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string , ser string) erro
   	if err != nil {
         return err
     }
-	//fmt.Println(config.Interface.IP)
-	//fmt.Println(config)
-	//fmt.Println(config.Device.Interface[0].Ifname)
 
-
+	//-----------
 	//CSVファイルを新規作成
 	t := time.Now().Format("20060102150405")
-	ScenarioName := "NEEDLEWORK_Scenario_" + t + ".csv"
-	file, err := os.Create(ScenarioName)
+	scenarioFileName := "NEEDLEWORK_Scenario_" + t + ".csv"
+	file, err := os.Create(scenarioFileName)
 
     if err != nil {
         return err
@@ -273,6 +283,9 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string , ser string) erro
 	
 	writer := csv.NewWriter(file) // utf8
 
+	//CSVファイルを新規作成
+	//----End----
+
 	//シナリオヘッダー情報書き込み
 	writer.Write([]string{"exclude-list","protocol","src-fw","src-vlan(option)","src-ip","src-port(option)","src-nat-ip(option)","dst-fw","dst-vlan(option)","dst-nat-ip(option)","dst-nat-port (option)","dst-ip","dst-port","url/domain(option)","anti-virus(option)","timeout(option)","try(option)","other-settings(option)","expect","description"})
 
@@ -287,6 +300,7 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string , ser string) erro
 
 		switch {
 			//ログヘッダーの読み込みをスキップする
+			//value.logtypeの値がTRAFFIC以外の場合は読み込まない
 			case value.logtype != "TRAFFIC":
 				continue
 		}
@@ -294,14 +308,13 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string , ser string) erro
 
 		//セッション終了理由がthratのログはシナリオから除外
 		switch{
-			case ser == "yes":
+			case flgSer == "yes":
 				if value.ser == "threat" {
-					fmt.Println(i)
+					unexpectedLogs = append(unexpectedLogs ,  UnexpectedResult{i , "Skip a log(Session end reason)"})
 					continue
 				}
 		}
 		
-
 		var newDfw	[]string
 		
 		//Tomlファイルに記載したIF情報とログ中のIN/OUT IF情報を比較し、s-fw、d−fwのIPアドレスを割り当てる
@@ -346,7 +359,44 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string , ser string) erro
 		}
 	}
 	
+	//CSV（シナリオ）書き込み
 	writer.Flush() 
+
+	//-----------
+	//テキストファイル（実行結果）を新規作成
+	resultFilename := "result_" + t + ".txt"
+	resultFile, err := os.Create(resultFilename)
+
+    if err != nil {
+        return err
+    }
+	defer resultFile.Close()
+	
+	//ファイルの中身を空にする
+	err = resultFile.Truncate(0)
+
+    if err != nil {
+        return err
+	}
+	
+	resultFileWriter := bufio.NewWriter(resultFile) 
+
+	for _, wr := range unexpectedLogs {
+		writeString  :=  "No " + strconv.Itoa(wr.No)  + ":" + wr.Message + "\n"
+
+		_, err = resultFileWriter.WriteString(writeString)
+
+		if err != nil {
+			return err
+		}
+	
+	}
+
+	resultFileWriter.Flush()
+	
+	//テキストファイル（実行結果）を新規作成
+	//----End----
+
 
 	return nil
 }
