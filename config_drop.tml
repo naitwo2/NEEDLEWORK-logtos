@@ -21,6 +21,12 @@ zone    = "DMZ2"
 vlanid  = "30" 
 
 [[device.interface]]
+ifname  = "ethernet1/4.30"
+ip      = "172.16.40.251"
+zone    = "DMZ2"
+vlanid  = "40" 
+
+[[device.interface]]
 ifname  = "ethernet1/2"
 ip      = "172.16.0.251"
 zone    = "Untrust"
