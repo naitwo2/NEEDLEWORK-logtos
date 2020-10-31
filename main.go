@@ -1,9 +1,3 @@
-//Todo
-//デフォルトは送信元ポートを消す
-//アプリ対応
-//readme
-///宛先IP/送信元IPがFWのインタフェースに設定されているIPの場合は除外する
-
 package main
 
 import (
@@ -66,9 +60,7 @@ type UnexpectedResult struct {
 func main() {
     var (
 	 	flgLogFile	= flag.String("f", "", "Specification a log file.")
-		flgCfg		= flag.String("c", "config.tml", "Specification a config file.")
-        //flgSer		= flag.String("ser", "no", "If \"Session End Reason\" is \"threat\", it will not be output to the scenario.")
-		
+		flgCfg		= flag.String("c", "config.tml", "Specification a config file.")		
 	)
 	
 	flag.Parse()
@@ -84,8 +76,6 @@ func main() {
         os.Exit(1)
 	}
 	
-	//fmt.Println(args)
-
 	err = genScenario(baseLogData , *flgCfg)
 
 	if err != nil {
@@ -251,8 +241,6 @@ func readLine(filename string) ([]ScenarioLine , error) {
 
 		//----End 値をシナリオ対応用語に変更----
 
-
-
 		//MAPに入れた値をスライスに代入（e.g: TRAFFIC 172.16.20.238...）
 		logdata = append(logdata, ScenarioLine{logdataLineMap["logtype"],logdataLineMap["time"],logdataLineMap["srcip"],logdataLineMap["destip"],logdataLineMap["natsrcip"],logdataLineMap["natdestip"],logdataLineMap["rulename"],logdataLineMap["srczone"],logdataLineMap["destzone"],logdataLineMap["ininterface"],logdataLineMap["outinterface"],logdataLineMap["srcport"],logdataLineMap["destport"],logdataLineMap["natsrcport"],logdataLineMap["natdestport"],logdataLineMap["protocol"],logdataLineMap["action"],logdataLineMap["ser"],logdataLineMap["description"]})
 
@@ -313,17 +301,8 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string) error {
 		//ログのNOと合わせるために+1する
 		i ++
 
-/* 		//セッション終了理由がthratのログはシナリオから除外
-		switch{
-			case flgSer == "yes":
-				if value.ser == "threat" {
-					unexpectedLogs = append(unexpectedLogs ,  UnexpectedResult{i , "Skip a log(Session end reason)"})
-					continue
-				} 
-		}*/
-		
 		var newDfw	[]string
-		
+		skipLog	:= false
 		//Tomlファイルに記載したIF情報とログ中のIN/OUT IF情報を比較し、s-fw、d−fwのIPアドレスを割り当てる
 		//i := 0
 		for _, tomlValue := range config.Device.Interface {
@@ -335,11 +314,13 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string) error {
 				//宛先IPがFWのインタフェースに設定されているIPの場合は除外する
 				case value.destip == tomlValue.Ip:
 					unexpectedLogs = append(unexpectedLogs ,  UnexpectedResult{i , "Skip a log - The FW IP address and the Det IP address are duplicated."})
-					continue
+					skipLog = true
+					//break
 				//送信元IPがFWのインタフェースに設定されているIPの場合は除外する
 				case value.srcip == tomlValue.Ip:
 					unexpectedLogs = append(unexpectedLogs ,  UnexpectedResult{i , "Skip a log - The FW IP address and the Src IP address are duplicated."})
-					continue
+					skipLog = true
+					//break
 				//out IFが空 = Dropログの場合の処理（Zoneからs-fw、d−fwのIPアドレスを割り当てる）
 				case len(value.outinterface) <= 1:
 					if value.destzone == tomlValue.Zone {
@@ -365,12 +346,11 @@ func genScenario(baseLogData []ScenarioLine , tomlFile string) error {
 			
 		}
 
-
-		//fmt.Println(dfw)
-
 		//シナリオの組み立て
-		for _, dfwMulti := range dfw {
-			writer.Write([]string{"",value.protocol , sfw , svlan , value.srcip , value.srcport , value.natsrcip , dfwMulti , dvlan , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename + " | " + value.time , value.description})     
+		if skipLog == false {
+			for _, dfwMulti := range dfw {
+				writer.Write([]string{"",value.protocol , sfw , svlan , value.srcip , value.srcport , value.natsrcip , dfwMulti , dvlan , value.natdestip , value.natdestport , value.destip , value.destport, "" , "" , "", "" , "" , value.action , value.rulename + " | " + value.time , value.description})     
+			}
 		}
 	}
 	
